@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Dragon — play the 87-line chess engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<style>
+  :root{
+    --bg:#12151a; --surface:#1b1f27; --surface2:#20242e; --hair:rgba(242,239,233,.09);
+    --ink:#f2efe9; --muted:#8891a3; --muted2:#5b6272;
+    --ember:#d4772c; --ember-dim:#a85f24;
+    --jade:#2fb3a3; --jade-dim:#238277;
+    --board-light:#ede6d6; --board-dark:#4a3b32;
+    --board-sel:#d4772c; --board-target:rgba(212,119,44,.35);
+    --danger:#c1502e;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1200px 700px at 15% -10%, rgba(212,119,44,.08), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, rgba(47,179,163,.06), transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:36px 24px 80px;}
+
+  /* ---------- header ---------- */
+  header{display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:28px; margin-bottom:8px;}
+  .brand h1{
+    font-family:'Fraunces',serif; font-optical-sizing:auto;
+    font-weight:900; font-size:clamp(2.4rem,5vw,3.6rem); line-height:.96; letter-spacing:-.01em;
+    margin:0;
+    background:linear-gradient(120deg, var(--ink) 40%, var(--ember) 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .brand p{margin:10px 0 0; color:var(--muted); font-size:1.02rem; max-width:46ch; line-height:1.5;}
+  .brand p b{color:var(--ink); font-weight:600;}
+
+  .plates{display:flex; gap:14px; flex-wrap:wrap;}
+  .plate{
+    background:var(--surface); border:1px solid var(--hair); border-radius:var(--radius);
+    padding:14px 18px; min-width:198px;
+  }
+  .plate .eng{
+    font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 6px;
+  }
+  .plate.md .eng{color:var(--ember);}
+  .plate.sf .eng{color:var(--jade);}
+  .plate .lines{font-family:'Fraunces',serif; font-weight:700; font-size:1.6rem; margin:0; line-height:1;}
+  .plate .spec{font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:var(--muted2); margin:8px 0 0; line-height:1.6;}
+
+  /* ---------- main layout ---------- */
+  main{display:grid; grid-template-columns:minmax(320px,560px) 1fr; gap:28px; margin-top:34px; align-items:start;}
+  @media (max-width:860px){ main{grid-template-columns:1fr;} }
+
+  .board-panel{background:var(--surface); border:1px solid var(--hair); border-radius:var(--radius); padding:18px;}
+  .board-frame{position:relative;}
+  #board{
+    display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr);
+    aspect-ratio:1; width:100%; border-radius:6px; overflow:hidden;
+    border:1px solid var(--hair);
+  }
+  .sq{position:relative; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none;}
+  .sq.light{background:var(--board-light);}
+  .sq.dark{background:var(--board-dark);}
+  .sq .piece{font-size:clamp(1.6rem,4.2vw,2.6rem); line-height:1; transition:transform .08s ease;}
+  .sq.white-piece .piece{color:#f6f2ea; text-shadow:0 1px 2px rgba(0,0,0,.45), 0 0 1px rgba(0,0,0,.6);}
+  .sq.black-piece .piece{color:#1a1512; text-shadow:0 1px 0 rgba(255,255,255,.18);}
+  .sq.selected::after{content:""; position:absolute; inset:3px; border:2px solid var(--board-sel); border-radius:3px; pointer-events:none;}
+  .sq.target::before{
+    content:""; position:absolute; width:26%; height:26%; border-radius:50%;
+    background:var(--board-target); pointer-events:none;
+  }
+  .sq.target.has-piece::before{
+    width:88%; height:88%; border-radius:8px; background:transparent;
+    border:3px solid var(--board-target);
+  }
+  .sq.last-from,.sq.last-to{box-shadow:inset 0 0 0 999px rgba(212,119,44,.16);}
+  .coords{
+    position:absolute; inset:0; pointer-events:none;
+    font-family:'IBM Plex Mono',monospace; font-size:.62rem; color:rgba(0,0,0,.28);
+  }
+
+  .promo-picker{
+    position:absolute; z-index:5; background:var(--surface2); border:1px solid var(--hair);
+    border-radius:8px; padding:8px; display:flex; gap:6px; box-shadow:0 12px 30px rgba(0,0,0,.5);
+  }
+  .promo-picker button{
+    width:44px; height:44px; border-radius:6px; border:1px solid var(--hair); background:var(--surface);
+    color:var(--ink); font-size:1.4rem; cursor:pointer;
+  }
+  .promo-picker button:hover{border-color:var(--ember); color:var(--ember);}
+
+  .status-row{display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:12px;}
+  .status-text{font-size:.92rem; color:var(--muted);}
+  .status-text b{color:var(--ink);}
+  .thinking{
+    display:none; align-items:center; gap:8px; font-family:'IBM Plex Mono',monospace; font-size:.78rem; color:var(--ember);
+  }
+  .thinking.show{display:flex;}
+  .dot{width:7px; height:7px; border-radius:50%; background:currentColor; animation:pulse 1.1s ease-in-out infinite;}
+  .dot:nth-child(2){animation-delay:.18s;} .dot:nth-child(3){animation-delay:.36s;}
+  @keyframes pulse{0%,80%,100%{opacity:.25; transform:scale(.8);} 40%{opacity:1; transform:scale(1);}}
+  @media (prefers-reduced-motion:reduce){ .dot{animation:none; opacity:1;} }
+
+  /* ---------- side panel ---------- */
+  .side{display:flex; flex-direction:column; gap:16px;}
+  .card{background:var(--surface); border:1px solid var(--hair); border-radius:var(--radius); padding:18px;}
+  .card h2{
+    font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 12px;
+  }
+  .seg{display:flex; border:1px solid var(--hair); border-radius:8px; overflow:hidden;}
+  .seg button{
+    flex:1; padding:11px 10px; background:var(--surface2); color:var(--muted); border:none; cursor:pointer;
+    font-family:'Inter',sans-serif; font-size:.88rem; font-weight:600; transition:background .15s,color .15s;
+  }
+  .seg button + button{border-left:1px solid var(--hair);}
+  .seg button.active{color:var(--ink);}
+  .seg button.active[data-opp="mini_dragon"]{background:linear-gradient(180deg, rgba(212,119,44,.22), rgba(212,119,44,.08));}
+  .seg button.active[data-opp="sunfish"]{background:linear-gradient(180deg, rgba(47,179,163,.22), rgba(47,179,163,.08));}
+
+  .btn{
+    width:100%; padding:12px; margin-top:12px; border-radius:8px; border:1px solid var(--hair);
+    background:var(--surface2); color:var(--ink); font-family:'Inter',sans-serif; font-weight:600; font-size:.9rem;
+    cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  .btn:hover{border-color:var(--ember); color:var(--ember);}
+
+  .movelist{
+    font-family:'IBM Plex Mono',monospace; font-size:.84rem; line-height:1.9; color:var(--ink);
+    max-height:220px; overflow-y:auto; padding-right:4px;
+  }
+  .movelist .mv-row{display:grid; grid-template-columns:2.4em 1fr 1fr; gap:6px; color:var(--muted2);}
+  .movelist .mv-row span:not(:first-child){color:var(--ink);}
+  .movelist::-webkit-scrollbar{width:6px;}
+  .movelist::-webkit-scrollbar-thumb{background:var(--hair); border-radius:3px;}
+  .empty-log{color:var(--muted2); font-size:.85rem; font-style:italic;}
+
+  .loading-note{font-size:.85rem; color:var(--muted); line-height:1.6;}
+  .loading-note code{font-family:'IBM Plex Mono',monospace; background:var(--surface2); padding:1px 5px; border-radius:4px; font-size:.82rem;}
+
+  footer{margin-top:48px; padding-top:20px; border-top:1px solid var(--hair); color:var(--muted2); font-size:.82rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  footer a{color:var(--muted); text-decoration:none; border-bottom:1px solid var(--hair);}
+  footer a:hover{color:var(--ember); border-color:var(--ember);}
+
+  :focus-visible{outline:2px solid var(--ember); outline-offset:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>Mini&nbsp;Dragon</h1>
+      <p>An <b>87-line</b> Python chess engine — 0x88 board, full legality, tapered evaluation,
+        transposition table, null-move pruning — playing live in your browser via Pyodide.
+        Test it against <b>Sunfish</b>, the 111-line engine it was built to out-play.</p>
+    </div>
+    <div class="plates">
+      <div class="plate md">
+        <p class="eng">Mini Dragon</p>
+        <p class="lines">87 lines</p>
+        <p class="spec">0 dependencies<br>TT · null-move · aspiration<br>tapered PST eval</p>
+      </div>
+      <div class="plate sf">
+        <p class="eng">Sunfish</p>
+        <p class="lines">111 lines</p>
+        <p class="spec">0 dependencies<br>MTD-bi search<br>no tapered eval</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="board-panel">
+      <div class="board-frame">
+        <div id="board"></div>
+        <div id="promoPicker" class="promo-picker" style="display:none;"></div>
+      </div>
+      <div class="status-row">
+        <div class="status-text" id="statusText">Loading engines…</div>
+        <div class="thinking" id="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span id="thinkingLabel">thinking</span></div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2>Opponent</h2>
+        <div class="seg">
+          <button data-opp="mini_dragon" class="active">Mini Dragon</button>
+          <button data-opp="sunfish">Sunfish</button>
+        </div>
+        <button class="btn" id="newGameBtn">New game — you play White</button>
+        <button class="btn" id="swapBtn">New game — you play Black</button>
+      </div>
+
+      <div class="card">
+        <h2>Moves</h2>
+        <div class="movelist" id="moveList"><div class="empty-log">No moves yet.</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Setup</h2>
+        <p class="loading-note" id="loadingNote">
+          Fetching <code>engine_compact.py</code> from
+          <code>g-c-3/mini-dragon</code> and booting Python (Pyodide)…
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span>Mini Dragon vs Sunfish · both engines run unmodified, client-side, via Pyodide</span>
+    <a href="https://github.com/g-c-3/mini-dragon" target="_blank" rel="noopener">github.com/g-c-3/mini-dragon</a>
+  </footer>
+</div>
+
+<script id="sunfish-src" type="text/plain">
+from itertools import count
+from collections import namedtuple
+
+piece = {"P": 100, "N": 280, "B": 320, "R": 479, "Q": 929, "K": 60000}
+pst = {
+    'P': ( 0, 0, 0, 0, 0, 0, 0, 0,
+        78, 83, 86, 73, 102, 82, 85, 90,
+        7, 29, 21, 44, 40, 31, 44, 7,
+        -17, 16, -2, 15, 14, 0, 15, -13,
+        -26, 3, 10, 9, 6, 1, 0, -23,
+        -22, 9, 5, -11, -10, -2, 3, -19,
+        -31, 8, -7, -37, -36, -14, 3, -31,
+        0, 0, 0, 0, 0, 0, 0, 0),
+    'N': ( -66, -53, -75, -75, -10, -55, -58, -70,
+        -3, -6, 100, -36, 4, 62, -4, -14,
+        10, 67, 1, 74, 73, 27, 62, -2,
+        24, 24, 45, 37, 33, 41, 25, 17,
+        -1, 5, 31, 21, 22, 35, 2, 0,
+        -18, 10, 13, 22, 18, 15, 11, -14,
+        -23, -15, 2, 0, 2, 0, -23, -20,
+        -74, -23, -26, -24, -19, -35, -22, -69),
+    'B': ( -59, -78, -82, -76, -23, -107, -37, -50,
+        -11, 20, 35, -42, -39, 31, 2, -22,
+        -9, 39, -32, 41, 52, -10, 28, -14,
+        25, 17, 20, 34, 26, 25, 15, 10,
+        13, 10, 17, 23, 17, 16, 0, 7,
+        14, 25, 24, 15, 8, 25, 20, 15,
+        19, 20, 11, 6, 7, 6, 20, 16,
+        -7, 2, -15, -12, -14, -15, -10, -10),
+    'R': ( 35, 29, 33, 4, 37, 33, 56, 50,
+        55, 29, 56, 67, 55, 62, 34, 60,
+        19, 35, 28, 33, 45, 27, 25, 15,
+        0, 5, 16, 13, 18, -4, -9, -6,
+        -28, -35, -16, -21, -13, -29, -46, -30,
+        -42, -28, -42, -25, -25, -35, -26, -46,
+        -53, -38, -31, -26, -29, -43, -44, -53,
+        -30, -24, -18, 5, -2, -18, -31, -32),
+    'Q': ( 6, 1, -8, -104, 69, 24, 88, 26,
+        14, 32, 60, -10, 20, 76, 57, 24,
+        -2, 43, 32, 60, 72, 63, 43, 2,
+        1, -16, 22, 17, 25, 20, -13, -6,
+        -14, -15, -2, -5, -1, -10, -20, -22,
+        -30, -6, -13, -11, -16, -11, -16, -27,
+        -36, -18, 0, -19, -15, -15, -21, -38,
+        -39, -30, -31, -13, -31, -36, -34, -42),
+    'K': ( 4, 54, 47, -99, -99, 60, 83, -62,
+        -32, 10, 55, 56, 56, 55, 10, 3,
+        -62, 12, -57, 44, -67, 28, 37, -31,
+        -55, 50, 11, -4, -19, 13, 0, -49,
+        -55, -43, -52, -28, -51, -47, -8, -50,
+        -47, -42, -43, -79, -64, -32, -29, -32,
+        -4, 3, -14, -50, -57, -18, 13, 4,
+        17, 30, -3, -14, 6, -1, 40, 18),
+}
+for k, table in pst.items():
+    padrow = lambda row: (0,) + tuple(x + piece[k] for x in row) + (0,)
+    pst[k] = sum((padrow(table[i * 8: i * 8 + 8]) for i in range(8)), ())
+    pst[k] = (0,) * 20 + pst[k] + (0,) * 20
+
+A1, H1, A8, H8 = 91, 98, 21, 28
+initial = (
+    "         \n"
+    "         \n"
+    " rnbqkbnr\n"
+    " pppppppp\n"
+    " ........\n"
+    " ........\n"
+    " ........\n"
+    " ........\n"
+    " PPPPPPPP\n"
+    " RNBQKBNR\n"
+    "         \n"
+    "         \n"
+)
+
+N, E, S, W = -10, 1, 10, -1
+directions = {
+    "P": (N, N + N, N + W, N + E),
+    "N": (N + N + E, E + N + E, E + S + E, S + S + E, S + S + W, W + S + W, W + N + W, N + N + W),
+    "B": (N + E, S + E, S + W, N + W),
+    "R": (N, E, S, W),
+    "Q": (N, E, S, W, N + E, S + E, S + W, N + W),
+    "K": (N, E, S, W, N + E, S + E, S + W, N + W)
+}
+
+MATE_LOWER = piece["K"] - 10 * piece["Q"]
+MATE_UPPER = piece["K"] + 10 * piece["Q"]
+
+QS = 40
+QS_A = 140
+EVAL_ROUGHNESS = 15
+
+Move = namedtuple("Move", "i j prom")
+
+class Position(namedtuple("Position", "board score wc bc ep kp")):
+    def gen_moves(self):
+        for i, p in enumerate(self.board):
+            if not p.isupper():
+                continue
+            for d in directions[p]:
+                for j in count(i + d, d):
+                    q = self.board[j]
+                    if q.isspace() or q.isupper():
+                        break
+                    if p == "P":
+                        if d in (N, N + N) and q != ".":
+                            break
+                        if d == N + N and (i < A1 + N or self.board[i + N] != "."):
+                            break
+                        if (d in (N + W, N + E) and q == "."
+                                and j not in (self.ep, self.kp, self.kp - 1, self.kp + 1)):
+                            break
+                        if A8 <= j <= H8:
+                            for prom in "NBRQ":
+                                yield Move(i, j, prom)
+                            break
+                    yield Move(i, j, "")
+                    if p in "PNK" or q.islower():
+                        break
+                    if i == A1 and self.board[j + E] == "K" and self.wc[0]:
+                        yield Move(j + E, j + W, "")
+                    if i == H1 and self.board[j + W] == "K" and self.wc[1]:
+                        yield Move(j + W, j + E, "")
+
+    def rotate(self, nullmove=False):
+        return Position(
+            self.board[::-1].swapcase(), -self.score, self.bc, self.wc,
+            119 - self.ep if self.ep and not nullmove else 0,
+            119 - self.kp if self.kp and not nullmove else 0,
+        )
+
+    def move(self, move):
+        i, j, prom = move
+        p, q = self.board[i], self.board[j]
+        put = lambda board, i, p: board[:i] + p + board[i + 1:]
+        board = self.board
+        wc, bc, ep, kp = self.wc, self.bc, 0, 0
+        score = self.score + self.value(move)
+        board = put(board, j, board[i])
+        board = put(board, i, ".")
+        if i == A1: wc = (False, wc[1])
+        if i == H1: wc = (wc[0], False)
+        if j == A8: bc = (bc[0], False)
+        if j == H8: bc = (False, bc[1])
+        if p == "K":
+            wc = (False, False)
+            if abs(j - i) == 2:
+                kp = (i + j) // 2
+                board = put(board, A1 if j < i else H1, ".")
+                board = put(board, kp, "R")
+        if p == "P":
+            if A8 <= j <= H8:
+                board = put(board, j, prom)
+            if j - i == 2 * N:
+                ep = i + N
+            if j == self.ep:
+                board = put(board, j + S, ".")
+        return Position(board, score, wc, bc, ep, kp).rotate()
+
+    def value(self, move):
+        i, j, prom = move
+        p, q = self.board[i], self.board[j]
+        score = pst[p][j] - pst[p][i]
+        if q.islower():
+            score += pst[q.upper()][119 - j]
+        if abs(j - self.kp) < 2:
+            score += pst["K"][119 - j]
+        if p == "K" and abs(i - j) == 2:
+            score += pst["R"][(i + j) // 2]
+            score -= pst["R"][A1 if j < i else H1]
+        if p == "P":
+            if A8 <= j <= H8:
+                score += pst[prom][j] - pst["P"][j]
+            if j == self.ep:
+                score += pst["P"][119 - (j + S)]
+        return score
+
+Entry = namedtuple("Entry", "lower upper")
+
+class Searcher:
+    def __init__(self):
+        self.tp_score = {}
+        self.tp_move = {}
+        self.history = set()
+        self.nodes = 0
+
+    def bound(self, pos, gamma, depth, can_null=True):
+        self.nodes += 1
+        depth = max(depth, 0)
+        if pos.score <= -MATE_LOWER:
+            return -MATE_UPPER
+        entry = self.tp_score.get((pos, depth, can_null), Entry(-MATE_UPPER, MATE_UPPER))
+        if entry.lower >= gamma: return entry.lower
+        if entry.upper < gamma: return entry.upper
+        if can_null and depth > 0 and pos in self.history:
+            return 0
+
+        def moves():
+            if depth > 2 and can_null and abs(pos.score) < 500:
+                yield None, -self.bound(pos.rotate(nullmove=True), 1 - gamma, depth - 3)
+            if depth == 0:
+                yield None, pos.score
+            killer = self.tp_move.get(pos)
+            if not killer and depth > 2:
+                self.bound(pos, gamma, depth - 3, can_null=False)
+                killer = self.tp_move.get(pos)
+            val_lower = QS - depth * QS_A
+            if killer and pos.value(killer) >= val_lower:
+                yield killer, -self.bound(pos.move(killer), 1 - gamma, depth - 1)
+            for val, move in sorted(((pos.value(m), m) for m in pos.gen_moves()), reverse=True):
+                if val < val_lower:
+                    break
+                if depth <= 1 and pos.score + val < gamma:
+                    yield move, pos.score + val if val < MATE_LOWER else MATE_UPPER
+                    break
+                yield move, -self.bound(pos.move(move), 1 - gamma, depth - 1)
+
+        best = -MATE_UPPER
+        for move, score in moves():
+            best = max(best, score)
+            if best >= gamma:
+                if move is not None:
+                    self.tp_move[pos] = move
+                break
+
+        if depth > 2 and best == -MATE_UPPER:
+            flipped = pos.rotate(nullmove=True)
+            in_check = self.bound(flipped, MATE_UPPER, 0) == MATE_UPPER
+            best = -MATE_LOWER if in_check else 0
+
+        if best >= gamma:
+            self.tp_score[pos, depth, can_null] = Entry(best, entry.upper)
+        if best < gamma:
+            self.tp_score[pos, depth, can_null] = Entry(entry.lower, best)
+        return best
+
+    def search(self, history):
+        self.nodes = 0
+        self.history = set(history)
+        self.tp_score.clear()
+        gamma = 0
+        for depth in range(1, 1000):
+            lower, upper = -MATE_LOWER, MATE_LOWER
+            while lower < upper - EVAL_ROUGHNESS:
+                score = self.bound(history[-1], gamma, depth, can_null=False)
+                if score >= gamma:
+                    lower = score
+                if score < gamma:
+                    upper = score
+                yield depth, gamma, score, self.tp_move.get(history[-1])
+                gamma = (lower + upper + 1) // 2
+
+def parse(c):
+    fil, rank = ord(c[0]) - ord("a"), int(c[1]) - 1
+    return A1 + fil - 10 * rank
+
+def render(i):
+    rank, fil = divmod(i - A1, 10)
+    return chr(fil + ord("a")) + str(-rank + 1)
+</script>
+
+<script id="bridge-src" type="text/plain">
+import types, json
+
+def _load_module(name, source):
+    mod = types.ModuleType(name)
+    exec(source, mod.__dict__)
+    return mod
+
+def init_modules(md_source, sf_source):
+    global MD, SF
+    MD = _load_module('mini_dragon', md_source)
+    SF = _load_module('sunfish', sf_source)
+
+def _alg_to_md_sq(alg):
+    file = ord(alg[0]) - 97
+    rank = int(alg[1]) - 1
+    return rank * 16 + file
+
+class Game:
+    def __init__(self, opponent, human_white):
+        self.opponent = opponent
+        self.human_white = human_white
+        self.pos = MD.start()
+        self.sf_hist = [SF.Position(SF.initial, 0, (True, True), (True, True), 0, 0)] if opponent == 'sunfish' else None
+        self.sf_ply = 0
+        self.move_log = []
+
+    def display_board(self):
+        b = self.pos.board
+        rows = []
+        for rank in range(7, -1, -1):
+            row = []
+            for file in range(8):
+                p = b[rank * 16 + file]
+                row.append(p if p not in ('.', None) else None)
+            rows.append(row)
+        return rows
+
+    def side_to_move_white(self):
+        return self.pos.wtm
+
+    def legal_targets(self, frm_alg):
+        frm = _alg_to_md_sq(frm_alg)
+        out = []
+        for f, t, c, fl in MD.legal(self.pos):
+            if f == frm:
+                out.append({'to': MD.nm(t), 'promo': (fl[1] if fl and fl[0] == '=' else None), 'capture': c})
+        return out
+
+    def is_over(self):
+        return len(MD.legal(self.pos)) == 0
+
+    def game_over_reason(self):
+        return 'checkmate' if MD.in_check(self.pos) else 'stalemate'
+
+    def player_move(self, frm_alg, to_alg, promo):
+        frm = _alg_to_md_sq(frm_alg)
+        to = _alg_to_md_sq(to_alg)
+        cands = [(f, t, c, fl) for f, t, c, fl in MD.legal(self.pos) if f == frm and t == to]
+        if not cands:
+            return json.dumps({'ok': False})
+        if len(cands) > 1:
+            want = '=' + (promo or 'Q')
+            chosen = next((m for m in cands if m[3] == want), cands[0])
+        else:
+            chosen = cands[0]
+        promo_letter = chosen[3][1] if chosen[3] and chosen[3][0] == '=' else None
+        mv_str = frm_alg + to_alg + (promo_letter.lower() if promo_letter else '')
+        self.pos = MD.make_move(self.pos, chosen[0], chosen[1], chosen[3])
+        self.move_log.append(mv_str)
+        if self.opponent == 'sunfish':
+            self._apply_to_sf(mv_str)
+        over = self.is_over()
+        return json.dumps({'ok': True, 'over': over, 'reason': self.game_over_reason() if over else None})
+
+    def _apply_to_sf(self, mv_str):
+        i = SF.parse(mv_str[0:2])
+        j = SF.parse(mv_str[2:4])
+        prom = mv_str[4:].upper() if len(mv_str) > 4 else ''
+        if self.sf_ply % 2 == 1:
+            i, j = 119 - i, 119 - j
+        self.sf_hist.append(self.sf_hist[-1].move(SF.Move(i, j, prom)))
+        self.sf_ply += 1
+
+    def ai_move(self, md_depth, sf_depth, sf_node_cap):
+        if self.opponent == 'mini_dragon':
+            r = MD.best_move(self.pos, md_depth)
+            if r is None or r[0] is None:
+                return json.dumps({'ok': False})
+            mv, score = r
+            f, t, c, fl = mv
+            frm_alg, to_alg = MD.nm(f), MD.nm(t)
+            promo = fl[1] if fl and fl[0] == '=' else None
+            mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
+            self.pos = MD.make_move(self.pos, f, t, fl)
+            self.move_log.append(mv_str)
+        else:
+            s = SF.Searcher()
+            best = None
+            for depth, gamma, sc, move in s.search(self.sf_hist):
+                if move and sc >= gamma:
+                    best = (move, sc)
+                if depth >= sf_depth or s.nodes > sf_node_cap:
+                    break
+            if best is None:
+                return json.dumps({'ok': False})
+            move, score = best
+            i, j = move.i, move.j
+            if self.sf_ply % 2 == 1:
+                i, j = 119 - i, 119 - j
+            frm_alg, to_alg = SF.render(i), SF.render(j)
+            promo = move.prom if move.prom else None
+            mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
+            self.sf_hist.append(self.sf_hist[-1].move(SF.Move(move.i, move.j, move.prom)))
+            self.sf_ply += 1
+            f, t = _alg_to_md_sq(frm_alg), _alg_to_md_sq(to_alg)
+            piece = self.pos.board[f]
+            flag = None
+            if piece.upper() == 'K' and abs(t - f) == 2:
+                flag = 'OO' if t > f else 'OOO'
+            elif piece.upper() == 'P' and t == self.pos.ep:
+                flag = 'ep'
+            elif piece.upper() == 'P' and promo:
+                flag = '=' + promo
+            self.pos = MD.make_move(self.pos, f, t, flag)
+            self.move_log.append(mv_str)
+        over = self.is_over()
+        return json.dumps({'ok': True, 'from': frm_alg, 'to': to_alg, 'promo': promo, 'score': score,
+                            'over': over, 'reason': self.game_over_reason() if over else None})
+
+GAME = None
+
+def new_game(opponent, human_white):
+    global GAME
+    GAME = Game(opponent, human_white)
+    return json.dumps({'ok': True})
+
+def get_state():
+    return json.dumps({
+        'board': GAME.display_board(),
+        'white_to_move': GAME.side_to_move_white(),
+        'move_log': GAME.move_log,
+        'human_white': GAME.human_white,
+    })
+
+def get_legal_targets(frm_alg):
+    return json.dumps(GAME.legal_targets(frm_alg))
+
+def make_player_move(frm_alg, to_alg, promo):
+    return GAME.player_move(frm_alg, to_alg, promo if promo else None)
+
+def make_ai_move(md_depth, sf_depth, sf_node_cap):
+    return GAME.ai_move(md_depth, sf_depth, sf_node_cap)
+</script>
+
+<script>
+const MD_URL = "https://cdn.jsdelivr.net/gh/g-c-3/mini-dragon@main/engine_compact.py";
+const PIECE_GLYPH = {K:"♔",Q:"♕",R:"♖",B:"♗",N:"♘",P:"♙",k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
+const MD_DEPTH = 4, SF_DEPTH = 3, SF_NODE_CAP = 20000;
+
+let pyodide = null;
+let state = { board: [], white_to_move: true, move_log: [], human_white: true };
+let selected = null;         // algebraic square currently selected, or null
+let legalTargets = [];       // list of {to, promo, capture} for the selected square
+let opponent = "mini_dragon";
+let humanWhite = true;
+let gameOver = false;
+let lastMove = null;         // {from, to}
+
+const boardEl = document.getElementById("board");
+const statusEl = document.getElementById("statusText");
+const thinkingEl = document.getElementById("thinking");
+const thinkingLabel = document.getElementById("thinkingLabel");
+const moveListEl = document.getElementById("moveList");
+const promoPicker = document.getElementById("promoPicker");
+const loadingNote = document.getElementById("loadingNote");
+
+function fileRank(alg){ return { file: alg.charCodeAt(0)-97, rank: parseInt(alg[1],10)-1 }; }
+function algOf(file,rank){ return String.fromCharCode(97+file) + (rank+1); }
+
+function renderBoard(){
+  boardEl.innerHTML = "";
+  for(let displayRow=0; displayRow<8; displayRow++){
+    for(let col=0; col<8; col++){
+      const rank = 7-displayRow;         // state.board[0] is rank 8
+      const file = col;
+      const alg = algOf(file, rank);
+      const sq = document.createElement("div");
+      const light = (file+rank)%2===1;
+      sq.className = "sq " + (light?"light":"dark");
+      sq.dataset.alg = alg;
+      const piece = state.board[displayRow][col];
+      if(piece){
+        sq.classList.add(piece===piece.toUpperCase() ? "white-piece" : "black-piece");
+        const span = document.createElement("span");
+        span.className = "piece";
+        span.textContent = PIECE_GLYPH[piece] || "?";
+        sq.appendChild(span);
+      }
+      if(selected===alg) sq.classList.add("selected");
+      if(lastMove && (lastMove.from===alg)) sq.classList.add("last-from");
+      if(lastMove && (lastMove.to===alg)) sq.classList.add("last-to");
+      const tgt = legalTargets.find(t=>t.to===alg);
+      if(tgt){ sq.classList.add("target"); if(tgt.capture) sq.classList.add("has-piece"); }
+      sq.addEventListener("click", onSquareClick);
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+function updateStatusText(){
+  if(gameOver){ return; }
+  const turnWhite = state.white_to_move;
+  const isHumanTurn = (turnWhite === humanWhite);
+  const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
+  statusEl.innerHTML = isHumanTurn
+    ? `Your move — playing <b>${turnWhite?"White":"Black"}</b>`
+    : `<b>${oppName}</b> is playing ${turnWhite?"White":"Black"}`;
+}
+
+function renderMoveLog(){
+  if(state.move_log.length===0){ moveListEl.innerHTML = '<div class="empty-log">No moves yet.</div>'; return; }
+  let html = "";
+  for(let i=0;i<state.move_log.length;i+=2){
+    const num = (i/2)+1;
+    const w = state.move_log[i] || "";
+    const b = state.move_log[i+1] || "";
+    html += `<div class="mv-row"><span>${num}.</span><span>${w}</span><span>${b}</span></div>`;
+  }
+  moveListEl.innerHTML = html;
+  moveListEl.scrollTop = moveListEl.scrollHeight;
+}
+
+async function refreshState(){
+  const raw = pyodide.runPython("get_state()");
+  state = JSON.parse(raw);
+  renderBoard();
+  renderMoveLog();
+  updateStatusText();
+}
+
+function clearSelection(){ selected=null; legalTargets=[]; hidePromoPicker(); }
+
+async function onSquareClick(e){
+  if(gameOver) return;
+  const isHumanTurn = (state.white_to_move === humanWhite);
+  if(!isHumanTurn) return;
+  const alg = e.currentTarget.dataset.alg;
+
+  if(selected){
+    const tgt = legalTargets.find(t=>t.to===alg);
+    if(tgt){
+      const promoOptions = legalTargets.filter(t=>t.to===alg);
+      const needsPromo = promoOptions.some(t=>t.promo);
+      if(needsPromo){
+        showPromoPicker(e.currentTarget, alg);
+        return;
+      }
+      await commitMove(selected, alg, null);
+      return;
+    }
+    if(alg===selected){ clearSelection(); renderBoard(); return; }
+  }
+
+  const piece = state.board[7-fileRank(alg).rank][fileRank(alg).file];
+  if(!piece) { clearSelection(); renderBoard(); return; }
+  const isWhitePiece = piece===piece.toUpperCase();
+  if(isWhitePiece !== state.white_to_move){ clearSelection(); renderBoard(); return; }
+
+  selected = alg;
+  const raw = pyodide.runPython(`get_legal_targets(${JSON.stringify(alg)})`);
+  legalTargets = JSON.parse(raw);
+  renderBoard();
+}
+
+function showPromoPicker(squareEl, toAlg){
+  const rect = squareEl.getBoundingClientRect();
+  const frameRect = squareEl.closest(".board-frame").getBoundingClientRect();
+  promoPicker.style.left = (rect.left-frameRect.left) + "px";
+  promoPicker.style.top = (rect.top-frameRect.top - 54) + "px";
+  promoPicker.style.display = "flex";
+  promoPicker.innerHTML = "";
+  const whiteToMove = state.white_to_move;
+  ["Q","R","B","N"].forEach(p=>{
+    const b = document.createElement("button");
+    b.textContent = PIECE_GLYPH[whiteToMove?p:p.toLowerCase()];
+    b.addEventListener("click", async ()=>{
+      hidePromoPicker();
+      await commitMove(selected, toAlg, p);
+    });
+    promoPicker.appendChild(b);
+  });
+}
+function hidePromoPicker(){ promoPicker.style.display="none"; }
+
+async function commitMove(fromAlg, toAlg, promo){
+  const raw = pyodide.runPython(`make_player_move(${JSON.stringify(fromAlg)}, ${JSON.stringify(toAlg)}, ${promo?JSON.stringify(promo):"None"})`);
+  const res = JSON.parse(raw);
+  clearSelection();
+  lastMove = {from:fromAlg, to:toAlg};
+  await refreshState();
+  if(res.over){ endGame(res.reason); return; }
+  await maybeTriggerAI();
+}
+
+async function maybeTriggerAI(){
+  const isHumanTurn = (state.white_to_move === humanWhite);
+  if(isHumanTurn || gameOver) return;
+  const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
+  thinkingLabel.textContent = `${oppName} searching (depth ${opponent==="mini_dragon"?MD_DEPTH:SF_DEPTH})…`;
+  thinkingEl.classList.add("show");
+  await new Promise(r=>setTimeout(r,30)); // let the UI paint before blocking on search
+  const raw = pyodide.runPython(`make_ai_move(${MD_DEPTH}, ${SF_DEPTH}, ${SF_NODE_CAP})`);
+  const res = JSON.parse(raw);
+  thinkingEl.classList.remove("show");
+  if(!res.ok){ statusEl.textContent = "Engine found no move — game over."; return; }
+  lastMove = {from:res.from, to:res.to};
+  await refreshState();
+  if(res.over){ endGame(res.reason); }
+}
+
+function endGame(reason){
+  gameOver = true;
+  const isHumanTurn = (state.white_to_move === humanWhite);
+  if(reason==="stalemate"){
+    statusEl.innerHTML = "<b>Draw</b> — stalemate.";
+  } else {
+    const winnerIsHuman = isHumanTurn===false; // side TO MOVE has no moves and is in check -> they lose
+    statusEl.innerHTML = winnerIsHuman
+      ? "<b>You win</b> — checkmate."
+      : `<b>${opponent==="mini_dragon"?"Mini Dragon":"Sunfish"} wins</b> — checkmate.`;
+  }
+}
+
+async function startNewGame(asWhite){
+  humanWhite = asWhite;
+  gameOver = false; lastMove = null; clearSelection();
+  const raw = pyodide.runPython(`new_game(${JSON.stringify(opponent)}, ${asWhite?"True":"False"})`);
+  await refreshState();
+  if(!asWhite) await maybeTriggerAI();
+}
+
+document.querySelectorAll(".seg button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll(".seg button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    opponent = btn.dataset.opp;
+  });
+});
+document.getElementById("newGameBtn").addEventListener("click", ()=>startNewGame(true));
+document.getElementById("swapBtn").addEventListener("click", ()=>startNewGame(false));
+
+async function boot(){
+  statusEl.textContent = "Booting Python runtime…";
+  pyodide = await loadPyodide();
+
+  statusEl.textContent = "Fetching Mini Dragon from GitHub…";
+  const mdSource = await fetch(MD_URL).then(r=>r.text());
+  const sfSource = document.getElementById("sunfish-src").textContent;
+  const bridgeSource = document.getElementById("bridge-src").textContent;
+
+  pyodide.runPython(bridgeSource);
+  pyodide.globals.get("init_modules")(mdSource, sfSource);
+
+  loadingNote.textContent = "Engines loaded. Mini Dragon fetched live from g-c-3/mini-dragon; Sunfish embedded (verified reconstruction).";
+  await startNewGame(true);
+}
+boot().catch(err=>{
+  statusEl.textContent = "Failed to load — see console.";
+  console.error(err);
+});
+</script>
+</body>
+</html>
