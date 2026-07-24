@@ -9,6 +9,3 @@ Runs entirely client-side via [Pyodide](https://pyodide.org) — no server, no b
 ### Files
 - `engine_compact.py` — the engine
 - `index.html` — the playable page
-
-### If Pages isn't live yet
-Settings → Pages → Deploy from branch → `main` / root.
