@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="only light">
 <title>Mini Dragon — play the 87-line chess engine</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <style>
+  html{color-scheme:only light;}
   :root{
     --bg:#12151a; --surface:#1b1f27; --surface2:#20242e; --hair:rgba(242,239,233,.09);
     --ink:#f2efe9; --muted:#8891a3; --muted2:#5b6272;
     --ember:#d4772c; --ember-dim:#a85f24;
     --jade:#2fb3a3; --jade-dim:#238277;
-    --board-light:#ede6d6; --board-dark:#4a3b32;
+    --board-light:#796f63; --board-dark:#352a24;
     --board-sel:#d4772c; --board-target:rgba(212,119,44,.35);
     --danger:#c1502e;
     --radius:10px;
@@ -75,7 +77,7 @@
   .sq.dark{background:var(--board-dark);}
   .sq .piece{font-size:clamp(1.6rem,4.2vw,2.6rem); line-height:1; transition:transform .08s ease;}
   .sq.white-piece .piece{color:#f6f2ea; text-shadow:0 1px 2px rgba(0,0,0,.45), 0 0 1px rgba(0,0,0,.6);}
-  .sq.black-piece .piece{color:#1a1512; text-shadow:0 1px 0 rgba(255,255,255,.18);}
+  .sq.black-piece .piece{color:#f6f2ea; text-shadow:0 1px 2px rgba(0,0,0,.55), 0 0 1px rgba(0,0,0,.7);}
   .sq.selected::after{content:""; position:absolute; inset:3px; border:2px solid var(--board-sel); border-radius:3px; pointer-events:none;}
   .sq.target::before{
     content:""; position:absolute; width:26%; height:26%; border-radius:50%;
@@ -136,6 +138,7 @@
     cursor:pointer; transition:border-color .15s, color .15s;
   }
   .btn:hover{border-color:var(--ember); color:var(--ember);}
+  #autoPlayBtn.active{background:linear-gradient(180deg, rgba(212,119,44,.28), rgba(212,119,44,.1)); border-color:var(--ember); color:var(--ink);}
 
   .movelist{
     font-family:'IBM Plex Mono',monospace; font-size:.84rem; line-height:1.9; color:var(--ink);
@@ -202,6 +205,7 @@
         </div>
         <button class="btn" id="newGameBtn">New game — you play White</button>
         <button class="btn" id="swapBtn">New game — you play Black</button>
+        <button class="btn" id="autoPlayBtn">▶ Auto-play — Mini Dragon vs Sunfish</button>
       </div>
 
       <div class="card">
@@ -506,11 +510,12 @@ def _alg_to_md_sq(alg):
     return rank * 16 + file
 
 class Game:
-    def __init__(self, opponent, human_white):
+    def __init__(self, opponent, human_white, duel=False):
         self.opponent = opponent
         self.human_white = human_white
+        self.duel = duel
         self.pos = MD.start()
-        self.sf_hist = [SF.Position(SF.initial, 0, (True, True), (True, True), 0, 0)] if opponent == 'sunfish' else None
+        self.sf_hist = [SF.Position(SF.initial, 0, (True, True), (True, True), 0, 0)] if (opponent == 'sunfish' or duel) else None
         self.sf_ply = 0
         self.move_log = []
 
@@ -572,7 +577,8 @@ class Game:
         self.sf_ply += 1
 
     def ai_move(self, md_depth, sf_depth, sf_node_cap):
-        if self.opponent == 'mini_dragon':
+        use_md = self.pos.wtm if self.duel else (self.opponent == 'mini_dragon')
+        if use_md:
             r = MD.best_move(self.pos, md_depth)
             if r is None or r[0] is None:
                 return json.dumps({'ok': False})
@@ -583,6 +589,9 @@ class Game:
             mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
             self.pos = MD.make_move(self.pos, f, t, fl)
             self.move_log.append(mv_str)
+            if self.duel or self.opponent == 'sunfish':
+                self._apply_to_sf(mv_str)
+            engine_used = 'mini_dragon'
         else:
             s = SF.Searcher()
             best = None
@@ -613,15 +622,16 @@ class Game:
                 flag = '=' + promo
             self.pos = MD.make_move(self.pos, f, t, flag)
             self.move_log.append(mv_str)
+            engine_used = 'sunfish'
         over = self.is_over()
         return json.dumps({'ok': True, 'from': frm_alg, 'to': to_alg, 'promo': promo, 'score': score,
-                            'over': over, 'reason': self.game_over_reason() if over else None})
+                            'over': over, 'reason': self.game_over_reason() if over else None, 'engine': engine_used})
 
 GAME = None
 
-def new_game(opponent, human_white):
+def new_game(opponent, human_white, duel=False):
     global GAME
-    GAME = Game(opponent, human_white)
+    GAME = Game(opponent, human_white, duel)
     return json.dumps({'ok': True})
 
 def get_state():
@@ -630,6 +640,7 @@ def get_state():
         'white_to_move': GAME.side_to_move_white(),
         'move_log': GAME.move_log,
         'human_white': GAME.human_white,
+        'duel': GAME.duel,
     })
 
 def get_legal_targets(frm_alg):
@@ -644,8 +655,8 @@ def make_ai_move(md_depth, sf_depth, sf_node_cap):
 
 <script>
 const MD_URL = "https://cdn.jsdelivr.net/gh/g-c-3/mini-dragon@main/engine_compact.py";
-const PIECE_GLYPH = {K:"♔",Q:"♕",R:"♖",B:"♗",N:"♘",P:"♙",k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
-const MD_DEPTH = 4, SF_DEPTH = 3, SF_NODE_CAP = 20000;
+const PIECE_GLYPH = {K:"♚",Q:"♛",R:"♜",B:"♝",N:"♞",P:"♟",k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"};
+const MD_DEPTH = 3, SF_DEPTH = 3, SF_NODE_CAP = 20000;
 
 let pyodide = null;
 let state = { board: [], white_to_move: true, move_log: [], human_white: true };
@@ -655,6 +666,8 @@ let opponent = "mini_dragon";
 let humanWhite = true;
 let gameOver = false;
 let lastMove = null;         // {from, to}
+let autoPlay = false;
+let autoPlayRunning = false;
 
 const boardEl = document.getElementById("board");
 const statusEl = document.getElementById("statusText");
@@ -700,8 +713,12 @@ function renderBoard(){
 function updateStatusText(){
   if(gameOver){ return; }
   const turnWhite = state.white_to_move;
-  const isHumanTurn = (turnWhite === humanWhite);
   const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
+  if(autoPlay){
+    statusEl.innerHTML = `<b>Mini Dragon</b> (White) vs <b>Sunfish</b> (Black) — ${turnWhite?"White":"Black"} to move`;
+    return;
+  }
+  const isHumanTurn = (turnWhite === humanWhite);
   statusEl.innerHTML = isHumanTurn
     ? `Your move — playing <b>${turnWhite?"White":"Black"}</b>`
     : `<b>${oppName}</b> is playing ${turnWhite?"White":"Black"}`;
@@ -731,7 +748,7 @@ async function refreshState(){
 function clearSelection(){ selected=null; legalTargets=[]; hidePromoPicker(); }
 
 async function onSquareClick(e){
-  if(gameOver) return;
+  if(gameOver || autoPlay) return;
   const isHumanTurn = (state.white_to_move === humanWhite);
   if(!isHumanTurn) return;
   const alg = e.currentTarget.dataset.alg;
@@ -811,17 +828,58 @@ async function maybeTriggerAI(){
 function endGame(reason){
   gameOver = true;
   const isHumanTurn = (state.white_to_move === humanWhite);
+  const loserWhite = state.white_to_move; // side to move has no moves
   if(reason==="stalemate"){
     statusEl.innerHTML = "<b>Draw</b> — stalemate.";
+  } else if(autoPlay){
+    statusEl.innerHTML = `<b>${loserWhite?"Sunfish":"Mini Dragon"} wins</b> — checkmate.`;
   } else {
     const winnerIsHuman = isHumanTurn===false; // side TO MOVE has no moves and is in check -> they lose
     statusEl.innerHTML = winnerIsHuman
       ? "<b>You win</b> — checkmate."
       : `<b>${opponent==="mini_dragon"?"Mini Dragon":"Sunfish"} wins</b> — checkmate.`;
   }
+  if(autoPlay){ autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn(); }
+}
+
+function updateAutoPlayBtn(){
+  autoPlayBtn.textContent = autoPlay ? "⏸ Stop auto-play" : "▶ Auto-play — Mini Dragon vs Sunfish";
+  autoPlayBtn.classList.toggle("active", autoPlay);
+}
+
+async function stepAutoPlay(){
+  if(!autoPlay || gameOver){ autoPlayRunning = false; return; }
+  autoPlayRunning = true;
+  const engineNow = state.white_to_move ? "Mini Dragon" : "Sunfish";
+  const depthNow = state.white_to_move ? MD_DEPTH : SF_DEPTH;
+  thinkingLabel.textContent = `${engineNow} searching (depth ${depthNow})…`;
+  thinkingEl.classList.add("show");
+  await new Promise(r=>setTimeout(r,30)); // let the UI paint before blocking on search
+  const raw = pyodide.runPython(`make_ai_move(${MD_DEPTH}, ${SF_DEPTH}, ${SF_NODE_CAP})`);
+  const res = JSON.parse(raw);
+  thinkingEl.classList.remove("show");
+  if(!res.ok){
+    statusEl.textContent = "Engine found no move — game over.";
+    autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn();
+    return;
+  }
+  lastMove = {from:res.from, to:res.to};
+  await refreshState();
+  if(res.over){ endGame(res.reason); return; }
+  if(!autoPlay){ autoPlayRunning = false; return; }
+  await new Promise(r=>setTimeout(r, 400)); // brief pause so moves are visible
+  stepAutoPlay();
+}
+
+async function startDuelGame(){
+  gameOver = false; lastMove = null; clearSelection();
+  const raw = pyodide.runPython(`new_game(${JSON.stringify(opponent)}, True, True)`);
+  await refreshState();
+  if(autoPlay){ if(!autoPlayRunning) stepAutoPlay(); }
 }
 
 async function startNewGame(asWhite){
+  autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn();
   humanWhite = asWhite;
   gameOver = false; lastMove = null; clearSelection();
   const raw = pyodide.runPython(`new_game(${JSON.stringify(opponent)}, ${asWhite?"True":"False"})`);
@@ -838,6 +896,18 @@ document.querySelectorAll(".seg button").forEach(btn=>{
 });
 document.getElementById("newGameBtn").addEventListener("click", ()=>startNewGame(true));
 document.getElementById("swapBtn").addEventListener("click", ()=>startNewGame(false));
+
+const autoPlayBtn = document.getElementById("autoPlayBtn");
+autoPlayBtn.addEventListener("click", ()=>{
+  autoPlay = !autoPlay;
+  updateAutoPlayBtn();
+  if(autoPlay){
+    startDuelGame();
+  } else {
+    clearSelection(); renderBoard(); updateStatusText();
+  }
+});
+
 
 async function boot(){
   statusEl.textContent = "Booting Python runtime…";
