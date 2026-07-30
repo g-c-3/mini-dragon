@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,900&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <style>
   html{color-scheme:only light;}
   :root{
@@ -107,14 +106,6 @@
   .status-row{display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:12px;}
   .status-text{font-size:.92rem; color:var(--muted);}
   .status-text b{color:var(--ink);}
-  .thinking{
-    display:none; align-items:center; gap:8px; font-family:'IBM Plex Mono',monospace; font-size:.78rem; color:var(--ember);
-  }
-  .thinking.show{display:flex;}
-  .dot{width:7px; height:7px; border-radius:50%; background:currentColor; animation:pulse 1.1s ease-in-out infinite;}
-  .dot:nth-child(2){animation-delay:.18s;} .dot:nth-child(3){animation-delay:.36s;}
-  @keyframes pulse{0%,80%,100%{opacity:.25; transform:scale(.8);} 40%{opacity:1; transform:scale(1);}}
-  @media (prefers-reduced-motion:reduce){ .dot{animation:none; opacity:1;} }
 
   /* ---------- side panel ---------- */
   .side{display:flex; flex-direction:column; gap:16px;}
@@ -193,7 +184,6 @@
       </div>
       <div class="status-row">
         <div class="status-text" id="statusText">Loading engines…</div>
-        <div class="thinking" id="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span id="thinkingLabel">thinking</span></div>
       </div>
     </div>
 
@@ -723,12 +713,101 @@ def make_ai_move(md_depth, sf_depth, sf_node_cap):
     return GAME.ai_move(md_depth, sf_depth, sf_node_cap)
 </script>
 
+<script id="worker-src" type="text/plain">
+importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js");
+
+let pyodide = null;
+let ready = false;
+
+self.onmessage = async (e) => {
+  const msg = e.data;
+
+  if (msg.type === "init") {
+    try {
+      pyodide = await loadPyodide();
+      pyodide.runPython(msg.bridgeSource);
+      pyodide.globals.get("init_modules")(msg.mdSource, msg.sfSource);
+      ready = true;
+      self.postMessage({ type: "ready" });
+    } catch (err) {
+      self.postMessage({ type: "ready-error", error: String(err) });
+    }
+    return;
+  }
+
+  if (!ready) {
+    self.postMessage({ id: msg.id, ok: false, error: "engine not ready" });
+    return;
+  }
+
+  try {
+    let result;
+    switch (msg.type) {
+      case "newGame":
+        result = pyodide.runPython(
+          `new_game(${JSON.stringify(msg.opponent)}, ${msg.humanWhite ? "True" : "False"}, ${msg.duel ? "True" : "False"})`
+        );
+        break;
+      case "getState":
+        result = pyodide.runPython("get_state()");
+        break;
+      case "getLegalTargets":
+        result = pyodide.runPython(`get_legal_targets(${JSON.stringify(msg.alg)})`);
+        break;
+      case "playerMove":
+        result = pyodide.runPython(
+          `make_player_move(${JSON.stringify(msg.from)}, ${JSON.stringify(msg.to)}, ${msg.promo ? JSON.stringify(msg.promo) : "None"})`
+        );
+        break;
+      case "aiMove":
+        result = pyodide.runPython(`make_ai_move(${msg.mdDepth}, ${msg.sfDepth}, ${msg.sfNodeCap})`);
+        break;
+      default:
+        throw new Error("unknown message type: " + msg.type);
+    }
+    self.postMessage({ id: msg.id, ok: true, result });
+  } catch (err) {
+    self.postMessage({ id: msg.id, ok: false, error: String(err) });
+  }
+};
+</script>
+
 <script>
 const MD_URL = "https://cdn.jsdelivr.net/gh/g-c-3/mini-dragon@main/engine_compact.py";
 const PIECE_GLYPH = {K:"♚",Q:"♛",R:"♜",B:"♝",N:"♞",P:"♟",k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"};
-const MD_DEPTH = 3, SF_DEPTH = 3, SF_NODE_CAP = 20000;
+const MD_DEPTH = 5, SF_DEPTH = 12, SF_NODE_CAP = 80000;
 
-let pyodide = null;
+let worker = null;
+let msgId = 0;
+const pending = new Map();
+
+function callWorker(type, payload = {}){
+  return new Promise((resolve, reject)=>{
+    const id = ++msgId;
+    pending.set(id, {resolve, reject});
+    worker.postMessage({id, type, ...payload});
+  });
+}
+
+function initWorker(mdSource, sfSource, bridgeSource){
+  return new Promise((resolve, reject)=>{
+    const workerSource = document.getElementById("worker-src").textContent;
+    const blob = new Blob([workerSource], {type: "application/javascript"});
+    worker = new Worker(URL.createObjectURL(blob));
+    worker.onmessage = (e)=>{
+      const msg = e.data;
+      if(msg.type === "ready"){ resolve(); return; }
+      if(msg.type === "ready-error"){ reject(new Error(msg.error)); return; }
+      const p = pending.get(msg.id);
+      if(!p) return;
+      pending.delete(msg.id);
+      if(msg.ok) p.resolve(msg.result); else p.reject(new Error(msg.error));
+    };
+    worker.onerror = (err)=>{ reject(err); };
+    worker.postMessage({type: "init", mdSource, sfSource, bridgeSource});
+  });
+}
+
 let state = { board: [], white_to_move: true, move_log: [], human_white: true, in_check: false };
 let selected = null;         // algebraic square currently selected, or null
 let legalTargets = [];       // list of {to, promo, capture} for the selected square
@@ -741,8 +820,6 @@ let autoPlayRunning = false;
 
 const boardEl = document.getElementById("board");
 const statusEl = document.getElementById("statusText");
-const thinkingEl = document.getElementById("thinking");
-const thinkingLabel = document.getElementById("thinkingLabel");
 const moveListEl = document.getElementById("moveList");
 const promoPicker = document.getElementById("promoPicker");
 const loadingNote = document.getElementById("loadingNote");
@@ -822,7 +899,7 @@ function renderMoveLog(){
 }
 
 async function refreshState(){
-  const raw = pyodide.runPython("get_state()");
+  const raw = await callWorker("getState");
   state = JSON.parse(raw);
   renderBoard();
   renderMoveLog();
@@ -858,7 +935,7 @@ async function onSquareClick(e){
   if(isWhitePiece !== state.white_to_move){ clearSelection(); renderBoard(); return; }
 
   selected = alg;
-  const raw = pyodide.runPython(`get_legal_targets(${JSON.stringify(alg)})`);
+  const raw = await callWorker("getLegalTargets", {alg});
   legalTargets = JSON.parse(raw);
   renderBoard();
 }
@@ -884,7 +961,7 @@ function showPromoPicker(squareEl, toAlg){
 function hidePromoPicker(){ promoPicker.style.display="none"; }
 
 async function commitMove(fromAlg, toAlg, promo){
-  const raw = pyodide.runPython(`make_player_move(${JSON.stringify(fromAlg)}, ${JSON.stringify(toAlg)}, ${promo?JSON.stringify(promo):"None"})`);
+  const raw = await callWorker("playerMove", {from: fromAlg, to: toAlg, promo});
   const res = JSON.parse(raw);
   clearSelection();
   lastMove = {from:fromAlg, to:toAlg};
@@ -896,13 +973,8 @@ async function commitMove(fromAlg, toAlg, promo){
 async function maybeTriggerAI(){
   const isHumanTurn = (state.white_to_move === humanWhite);
   if(isHumanTurn || gameOver) return;
-  const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
-  thinkingLabel.textContent = `${oppName} is thinking…`;
-  thinkingEl.classList.add("show");
-  await new Promise(r=>setTimeout(r,30)); // let the UI paint before blocking on search
-  const raw = pyodide.runPython(`make_ai_move(${MD_DEPTH}, ${SF_DEPTH}, ${SF_NODE_CAP})`);
+  const raw = await callWorker("aiMove", {mdDepth: MD_DEPTH, sfDepth: SF_DEPTH, sfNodeCap: SF_NODE_CAP});
   const res = JSON.parse(raw);
-  thinkingEl.classList.remove("show");
   if(!res.ok){ statusEl.textContent = "Engine found no move — game over."; return; }
   lastMove = {from:res.from, to:res.to};
   await refreshState();
@@ -941,13 +1013,8 @@ function updateAutoPlayBtn(){
 async function stepAutoPlay(){
   if(!autoPlay || gameOver){ autoPlayRunning = false; return; }
   autoPlayRunning = true;
-  const engineNow = state.white_to_move ? "Mini Dragon" : "Sunfish";
-  thinkingLabel.textContent = `${engineNow} is thinking…`;
-  thinkingEl.classList.add("show");
-  await new Promise(r=>setTimeout(r,30)); // let the UI paint before blocking on search
-  const raw = pyodide.runPython(`make_ai_move(${MD_DEPTH}, ${SF_DEPTH}, ${SF_NODE_CAP})`);
+  const raw = await callWorker("aiMove", {mdDepth: MD_DEPTH, sfDepth: SF_DEPTH, sfNodeCap: SF_NODE_CAP});
   const res = JSON.parse(raw);
-  thinkingEl.classList.remove("show");
   if(!res.ok){
     statusEl.textContent = "Engine found no move — game over.";
     autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn();
@@ -963,7 +1030,7 @@ async function stepAutoPlay(){
 
 async function startDuelGame(){
   gameOver = false; lastMove = null; clearSelection();
-  const raw = pyodide.runPython(`new_game(${JSON.stringify(opponent)}, True, True)`);
+  await callWorker("newGame", {opponent, humanWhite: true, duel: true});
   await refreshState();
   if(autoPlay){ if(!autoPlayRunning) stepAutoPlay(); }
 }
@@ -972,7 +1039,7 @@ async function startNewGame(asWhite){
   autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn();
   humanWhite = asWhite;
   gameOver = false; lastMove = null; clearSelection();
-  const raw = pyodide.runPython(`new_game(${JSON.stringify(opponent)}, ${asWhite?"True":"False"})`);
+  await callWorker("newGame", {opponent, humanWhite: asWhite, duel: false});
   await refreshState();
   if(!asWhite) await maybeTriggerAI();
 }
@@ -1000,18 +1067,15 @@ autoPlayBtn.addEventListener("click", ()=>{
 
 
 async function boot(){
-  statusEl.textContent = "Booting Python runtime…";
-  pyodide = await loadPyodide();
-
   statusEl.textContent = "Fetching Mini Dragon from GitHub…";
   const mdSource = await fetch(MD_URL).then(r=>r.text());
   const sfSource = document.getElementById("sunfish-src").textContent;
   const bridgeSource = document.getElementById("bridge-src").textContent;
 
-  pyodide.runPython(bridgeSource);
-  pyodide.globals.get("init_modules")(mdSource, sfSource);
+  statusEl.textContent = "Booting Python runtime in a background worker…";
+  await initWorker(mdSource, sfSource, bridgeSource);
 
-  loadingNote.textContent = "Engines loaded. Mini Dragon fetched live from g-c-3/mini-dragon; Sunfish embedded (verified reconstruction).";
+  loadingNote.textContent = "Engines loaded in a background worker (so the page never freezes). Mini Dragon fetched live from g-c-3/mini-dragon; Sunfish embedded (verified reconstruction).";
   await startNewGame(true);
 }
 boot().catch(err=>{
