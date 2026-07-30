@@ -484,7 +484,7 @@ def render(i):
 </script>
 
 <script id="bridge-src" type="text/plain">
-import types, json
+import types, json, random
 
 def _load_module(name, source):
     mod = types.ModuleType(name)
@@ -513,13 +513,41 @@ class Game:
         self.halfmove_clock = 0
         self.pos_history = [self._pos_key()]
 
-    def _pos_key(self):
-        b = tuple(self.pos.board)
-        wtm = self.pos.wtm
-        wc = getattr(self.pos, 'wc', None)
-        bc = getattr(self.pos, 'bc', None)
-        ep = getattr(self.pos, 'ep', None)
+    def _pos_key_of(self, pos):
+        b = tuple(pos.board)
+        wtm = pos.wtm
+        wc = getattr(pos, 'wc', None)
+        bc = getattr(pos, 'bc', None)
+        ep = getattr(pos, 'ep', None)
         return (b, wtm, wc, bc, ep)
+
+    def _pos_key(self):
+        return self._pos_key_of(self.pos)
+
+    def _would_repeat(self, f, t, flag):
+        # Would playing this move make the resulting position occur for the 3rd time?
+        candidate_pos = MD.make_move(self.pos, f, t, flag)
+        key = self._pos_key_of(candidate_pos)
+        return self.pos_history.count(key) >= 2
+
+    def _pick_non_repeating_move(self, avoid_f, avoid_t, avoid_flag):
+        # Cheap fallback used only when the engine's chosen move would draw by
+        # threefold repetition and a different legal move is available. Doesn't
+        # call into either engine's search — just prefers checks, then captures,
+        # then anything else, among moves that don't also repeat.
+        legal = [(f, t, c, fl) for f, t, c, fl in MD.legal(self.pos)
+                 if not (f == avoid_f and t == avoid_t and fl == avoid_flag)]
+        if not legal:
+            return None
+        non_repeating = [m for m in legal if not self._would_repeat(m[0], m[1], m[3])]
+        pool = non_repeating if non_repeating else legal
+        checks = [m for m in pool if MD.in_check(MD.make_move(self.pos, m[0], m[1], m[3]))]
+        if checks:
+            return random.choice(checks)
+        captures = [m for m in pool if m[2]]
+        if captures:
+            return random.choice(captures)
+        return random.choice(pool)
 
     def _record_move(self, frm, to, flag):
         piece = self.pos.board[frm]
@@ -639,6 +667,11 @@ class Game:
                 return json.dumps({'ok': False})
             mv, score = r
             f, t, c, fl = mv
+            if self._would_repeat(f, t, fl):
+                alt = self._pick_non_repeating_move(f, t, fl)
+                if alt is not None:
+                    f, t, c, fl = alt
+                    score = None
             frm_alg, to_alg = MD.nm(f), MD.nm(t)
             promo = fl[1] if fl and fl[0] == '=' else None
             mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
@@ -665,9 +698,6 @@ class Game:
                 i, j = 119 - i, 119 - j
             frm_alg, to_alg = SF.render(i), SF.render(j)
             promo = move.prom if move.prom else None
-            mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
-            self.sf_hist.append(self.sf_hist[-1].move(SF.Move(move.i, move.j, move.prom)))
-            self.sf_ply += 1
             f, t = _alg_to_md_sq(frm_alg), _alg_to_md_sq(to_alg)
             piece = self.pos.board[f]
             flag = None
@@ -677,9 +707,18 @@ class Game:
                 flag = 'ep'
             elif piece.upper() == 'P' and promo:
                 flag = '=' + promo
+            if self._would_repeat(f, t, flag):
+                alt = self._pick_non_repeating_move(f, t, flag)
+                if alt is not None:
+                    f, t, c, flag = alt
+                    frm_alg, to_alg = MD.nm(f), MD.nm(t)
+                    promo = flag[1] if flag and flag[0] == '=' else None
+                    score = None
+            mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
             self._record_move(f, t, flag)
             self.pos = MD.make_move(self.pos, f, t, flag)
             self._post_move_bookkeeping()
+            self._apply_to_sf(mv_str)
             self.move_log.append(mv_str)
             engine_used = 'sunfish'
         reason = self.game_over_reason()
@@ -775,7 +814,7 @@ self.onmessage = async (e) => {
 <script>
 const MD_URL = "https://cdn.jsdelivr.net/gh/g-c-3/mini-dragon@main/engine_compact.py";
 const PIECE_GLYPH = {K:"♚",Q:"♛",R:"♜",B:"♝",N:"♞",P:"♟",k:"♔",q:"♕",r:"♖",b:"♗",n:"♘",p:"♙"};
-const MD_DEPTH = 5, SF_DEPTH = 12, SF_NODE_CAP = 80000;
+const MD_DEPTH = 3, SF_DEPTH = 3, SF_NODE_CAP = 20000;
 
 let worker = null;
 let msgId = 0;
