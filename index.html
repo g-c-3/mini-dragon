@@ -520,6 +520,59 @@ class Game:
         self.sf_hist = [SF.Position(SF.initial, 0, (True, True), (True, True), 0, 0)] if (opponent == 'sunfish' or duel) else None
         self.sf_ply = 0
         self.move_log = []
+        self.halfmove_clock = 0
+        self.pos_history = [self._pos_key()]
+
+    def _pos_key(self):
+        b = tuple(self.pos.board)
+        wtm = self.pos.wtm
+        wc = getattr(self.pos, 'wc', None)
+        bc = getattr(self.pos, 'bc', None)
+        ep = getattr(self.pos, 'ep', None)
+        return (b, wtm, wc, bc, ep)
+
+    def _record_move(self, frm, to, flag):
+        piece = self.pos.board[frm]
+        is_pawn = piece is not None and piece not in ('.',) and piece.upper() == 'P'
+        target = self.pos.board[to]
+        is_capture = (target is not None and target != '.') or flag == 'ep'
+        if is_pawn or is_capture:
+            self.halfmove_clock = 0
+            self.pos_history = []
+        else:
+            self.halfmove_clock += 1
+
+    def _post_move_bookkeeping(self):
+        self.pos_history.append(self._pos_key())
+
+    def _piece_squares(self):
+        b = self.pos.board
+        out = []
+        for rank in range(8):
+            for file in range(8):
+                p = b[rank * 16 + file]
+                if p not in ('.', None):
+                    out.append((p, rank, file))
+        return out
+
+    def _insufficient_material(self):
+        pieces = self._piece_squares()
+        non_king = [(p, r, f) for p, r, f in pieces if p.upper() != 'K']
+        if not non_king:
+            return True
+        if len(non_king) == 1 and non_king[0][0].upper() in ('B', 'N'):
+            return True
+        if len(non_king) == 2 and all(p.upper() == 'B' for p, r, f in non_king):
+            (p1, r1, f1), (p2, r2, f2) = non_king
+            if p1 != p2 and (r1 + f1) % 2 == (r2 + f2) % 2:
+                return True
+        return False
+
+    def _threefold_repetition(self):
+        if not self.pos_history:
+            return False
+        current = self.pos_history[-1]
+        return self.pos_history.count(current) >= 3
 
     def display_board(self):
         b = self.pos.board
@@ -544,10 +597,18 @@ class Game:
         return out
 
     def is_over(self):
-        return len(MD.legal(self.pos)) == 0
+        return self.game_over_reason() is not None
 
     def game_over_reason(self):
-        return 'checkmate' if MD.in_check(self.pos) else 'stalemate'
+        if len(MD.legal(self.pos)) == 0:
+            return 'checkmate' if MD.in_check(self.pos) else 'stalemate'
+        if self.halfmove_clock >= 100:
+            return 'fifty_move'
+        if self._threefold_repetition():
+            return 'threefold'
+        if self._insufficient_material():
+            return 'insufficient_material'
+        return None
 
     def player_move(self, frm_alg, to_alg, promo):
         frm = _alg_to_md_sq(frm_alg)
@@ -562,12 +623,14 @@ class Game:
             chosen = cands[0]
         promo_letter = chosen[3][1] if chosen[3] and chosen[3][0] == '=' else None
         mv_str = frm_alg + to_alg + (promo_letter.lower() if promo_letter else '')
+        self._record_move(chosen[0], chosen[1], chosen[3])
         self.pos = MD.make_move(self.pos, chosen[0], chosen[1], chosen[3])
+        self._post_move_bookkeeping()
         self.move_log.append(mv_str)
         if self.opponent == 'sunfish':
             self._apply_to_sf(mv_str)
-        over = self.is_over()
-        return json.dumps({'ok': True, 'over': over, 'reason': self.game_over_reason() if over else None})
+        reason = self.game_over_reason()
+        return json.dumps({'ok': True, 'over': reason is not None, 'reason': reason})
 
     def _apply_to_sf(self, mv_str):
         i = SF.parse(mv_str[0:2])
@@ -589,7 +652,9 @@ class Game:
             frm_alg, to_alg = MD.nm(f), MD.nm(t)
             promo = fl[1] if fl and fl[0] == '=' else None
             mv_str = frm_alg + to_alg + (promo.lower() if promo else '')
+            self._record_move(f, t, fl)
             self.pos = MD.make_move(self.pos, f, t, fl)
+            self._post_move_bookkeeping()
             self.move_log.append(mv_str)
             if self.duel or self.opponent == 'sunfish':
                 self._apply_to_sf(mv_str)
@@ -622,12 +687,14 @@ class Game:
                 flag = 'ep'
             elif piece.upper() == 'P' and promo:
                 flag = '=' + promo
+            self._record_move(f, t, flag)
             self.pos = MD.make_move(self.pos, f, t, flag)
+            self._post_move_bookkeeping()
             self.move_log.append(mv_str)
             engine_used = 'sunfish'
-        over = self.is_over()
+        reason = self.game_over_reason()
         return json.dumps({'ok': True, 'from': frm_alg, 'to': to_alg, 'promo': promo, 'score': score,
-                            'over': over, 'reason': self.game_over_reason() if over else None, 'engine': engine_used})
+                            'over': reason is not None, 'reason': reason, 'engine': engine_used})
 
 GAME = None
 
@@ -842,12 +909,19 @@ async function maybeTriggerAI(){
   if(res.over){ endGame(res.reason); }
 }
 
+const DRAW_LABELS = {
+  stalemate: "stalemate",
+  fifty_move: "fifty-move rule",
+  threefold: "threefold repetition",
+  insufficient_material: "insufficient material",
+};
+
 function endGame(reason){
   gameOver = true;
   const isHumanTurn = (state.white_to_move === humanWhite);
   const loserWhite = state.white_to_move; // side to move has no moves
-  if(reason==="stalemate"){
-    statusEl.innerHTML = "<b>Draw</b> — stalemate.";
+  if(DRAW_LABELS[reason]){
+    statusEl.innerHTML = `<b>Draw</b> — ${DRAW_LABELS[reason]}.`;
   } else if(autoPlay){
     statusEl.innerHTML = `<b>${loserWhite?"Sunfish":"Mini Dragon"} wins</b> — checkmate.`;
   } else {
