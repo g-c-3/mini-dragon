@@ -38,18 +38,22 @@
   header{display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:28px; margin-bottom:8px;}
   .brand h1{
     font-family:'Fraunces',serif; font-optical-sizing:auto;
-    font-weight:900; font-size:clamp(2.4rem,5vw,3.6rem); line-height:.96; letter-spacing:-.01em;
-    margin:0;
+    font-weight:900; font-size:clamp(2.4rem,5vw,3.6rem); line-height:1.08; letter-spacing:-.01em;
+    margin:0; padding-bottom:.06em; overflow:visible;
     background:linear-gradient(120deg, var(--ink) 40%, var(--ember) 100%);
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
-  .brand p{margin:10px 0 0; color:var(--muted); font-size:1.02rem; max-width:46ch; line-height:1.5;}
-  .brand p b{color:var(--ink); font-weight:600;}
+
+  /* ---------- info section (moved below the game, per layout) ---------- */
+  .info-section{display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:28px; margin-top:36px;}
+  .info-section p{margin:10px 0 0; color:var(--muted); font-size:1.02rem; max-width:46ch; line-height:1.5;}
+  .info-section p b{color:var(--ink); font-weight:600;}
 
   .plates{display:flex; gap:14px; flex-wrap:wrap;}
   .plate{
     background:var(--surface); border:1px solid var(--hair); border-radius:var(--radius);
     padding:14px 18px; min-width:198px;
+    transition:box-shadow .3s ease, border-color .3s ease;
   }
   .plate .eng{
     font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
@@ -60,9 +64,25 @@
   .plate .lines{font-family:'Fraunces',serif; font-weight:700; font-size:1.6rem; margin:0; line-height:1;}
   .plate .spec{font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:var(--muted2); margin:8px 0 0; line-height:1.6;}
 
+  .plate.md.thinking{ border-color:var(--ember); animation:glowEmber 1.6s ease-in-out infinite; }
+  .plate.sf.thinking{ border-color:var(--jade); animation:glowJade 1.6s ease-in-out infinite; }
+  @keyframes glowEmber{
+    0%,100%{ box-shadow:0 0 4px 0 rgba(212,119,44,.25); }
+    50%{ box-shadow:0 0 18px 4px rgba(212,119,44,.55); }
+  }
+  @keyframes glowJade{
+    0%,100%{ box-shadow:0 0 4px 0 rgba(47,179,163,.25); }
+    50%{ box-shadow:0 0 18px 4px rgba(47,179,163,.55); }
+  }
+
   /* ---------- main layout ---------- */
   main{display:grid; grid-template-columns:minmax(320px,560px) 1fr; gap:28px; margin-top:34px; align-items:start;}
   @media (max-width:860px){ main{grid-template-columns:1fr;} }
+  @media (orientation:landscape){
+    main{grid-template-columns:1fr minmax(280px,520px);}
+    .board-panel{order:2;}
+    .side{order:1;}
+  }
 
   .board-panel{background:var(--surface); border:1px solid var(--hair); border-radius:var(--radius); padding:18px;}
   .board-frame{position:relative;}
@@ -106,6 +126,26 @@
   .status-row{display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:12px;}
   .status-text{font-size:.92rem; color:var(--muted);}
   .status-text b{color:var(--ink);}
+  .status-text .engine-name{color:var(--ink); font-weight:600; transition:color .3s ease, text-shadow .3s ease;}
+  .status-text .engine-name.thinking-md{color:var(--ember); animation:textGlowEmber 1.6s ease-in-out infinite;}
+  .status-text .engine-name.thinking-sf{color:var(--jade); animation:textGlowJade 1.6s ease-in-out infinite;}
+  @keyframes textGlowEmber{
+    0%,100%{ text-shadow:0 0 2px rgba(212,119,44,.25); }
+    50%{ text-shadow:0 0 8px rgba(212,119,44,.85), 0 0 16px rgba(212,119,44,.5); }
+  }
+  @keyframes textGlowJade{
+    0%,100%{ text-shadow:0 0 2px rgba(47,179,163,.25); }
+    50%{ text-shadow:0 0 8px rgba(47,179,163,.85), 0 0 16px rgba(47,179,163,.5); }
+  }
+
+  .captures-row{display:flex; align-items:center; min-height:22px; gap:8px;}
+  .captures-row.top{margin-bottom:10px;}
+  .captures-row.bottom{margin-top:10px;}
+  .captures-pieces{display:flex; flex-wrap:wrap; gap:1px; font-size:1.05rem; line-height:1; color:var(--muted);}
+  .captures-pieces .cap-piece{display:inline-block;}
+  .captures-pieces.white-caps .cap-piece{color:#f6f2ea; text-shadow:0 1px 2px rgba(0,0,0,.45);}
+  .captures-pieces.black-caps .cap-piece{color:#a9adb6;}
+  .captures-adv{font-family:'IBM Plex Mono',monospace; font-size:.74rem; color:var(--muted); font-weight:600;}
 
   /* ---------- side panel ---------- */
   .side{display:flex; flex-direction:column; gap:16px;}
@@ -149,6 +189,28 @@
   footer a{color:var(--muted); text-decoration:none; border-bottom:1px solid var(--hair);}
   footer a:hover{color:var(--ember); border-color:var(--ember);}
 
+  /* ---------- celebration + result modal ---------- */
+  .celebration-canvas{position:fixed; inset:0; pointer-events:none; z-index:9999; display:none;}
+
+  .result-modal-overlay{
+    position:fixed; inset:0; z-index:9998; display:flex; align-items:center; justify-content:center;
+    background:rgba(10,12,16,.68); opacity:0; pointer-events:none; transition:opacity .25s ease;
+  }
+  .result-modal-overlay.show{opacity:1; pointer-events:auto;}
+  .result-modal{
+    background:var(--surface); border:1px solid var(--hair); border-radius:14px;
+    padding:34px 38px; text-align:center; max-width:360px; width:88%;
+    box-shadow:0 24px 60px rgba(0,0,0,.55); transform:scale(.9) translateY(10px);
+    transition:transform .25s ease;
+  }
+  .result-modal-overlay.show .result-modal{transform:scale(1) translateY(0);}
+  .result-modal h3{
+    font-family:'Fraunces',serif; font-weight:800; font-size:1.7rem; margin:0 0 10px; color:var(--ink);
+  }
+  .result-modal p{margin:0 0 24px; color:var(--muted); font-size:.95rem; line-height:1.5;}
+  .result-modal .btn{margin-top:0;}
+
+
   :focus-visible{outline:2px solid var(--ember); outline-offset:2px;}
 </style>
 </head>
@@ -158,29 +220,22 @@
   <header>
     <div class="brand">
       <h1>Mini&nbsp;Dragon</h1>
-      <p>An <b>87-line</b> Python chess engine — 0x88 board, full legality, tapered evaluation,
-        transposition table, null-move pruning — playing live in your browser via Pyodide.
-        Test it against <b>Sunfish</b>, the 111-line engine it was built to out-play.</p>
-    </div>
-    <div class="plates">
-      <div class="plate md">
-        <p class="eng">Mini Dragon</p>
-        <p class="lines">87 lines</p>
-        <p class="spec">0 dependencies<br>TT · null-move · aspiration<br>tapered PST eval</p>
-      </div>
-      <div class="plate sf">
-        <p class="eng">Sunfish</p>
-        <p class="lines">111 lines</p>
-        <p class="spec">0 dependencies<br>MTD-bi search<br>no tapered eval</p>
-      </div>
     </div>
   </header>
 
   <main>
     <div class="board-panel">
+      <div class="captures-row top">
+        <div class="captures-pieces white-caps" id="capturesTop"></div>
+        <span class="captures-adv" id="capturesAdvTop"></span>
+      </div>
       <div class="board-frame">
         <div id="board"></div>
         <div id="promoPicker" class="promo-picker" style="display:none;"></div>
+      </div>
+      <div class="captures-row bottom">
+        <div class="captures-pieces black-caps" id="capturesBottom"></div>
+        <span class="captures-adv" id="capturesAdvBottom"></span>
       </div>
       <div class="status-row">
         <div class="status-text" id="statusText">Loading engines…</div>
@@ -214,12 +269,41 @@
     </div>
   </main>
 
+  <section class="info-section">
+    <p>An <b>87-line</b> Python chess engine — 0x88 board, full legality, tapered evaluation,
+      transposition table, null-move pruning — playing live in your browser via Pyodide.
+      Test it against <b>Sunfish</b>, the 111-line engine it was built to out-play.</p>
+    <div class="plates">
+      <div class="plate md" id="plateMd">
+        <p class="eng">Mini Dragon</p>
+        <p class="lines">87 lines</p>
+        <p class="spec">0 dependencies<br>TT · null-move · aspiration<br>tapered PST eval</p>
+      </div>
+      <div class="plate sf" id="plateSf">
+        <p class="eng">Sunfish</p>
+        <p class="lines">111 lines</p>
+        <p class="spec">0 dependencies<br>MTD-bi search<br>no tapered eval</p>
+      </div>
+    </div>
+  </section>
+
   <footer>
     <span>Mini Dragon vs Sunfish · both engines run unmodified, client-side, via Pyodide</span>
     <a href="https://github.com/g-c-3/mini-dragon" target="_blank" rel="noopener">github.com/g-c-3/mini-dragon</a>
     <span>© Gokul Chandar</span>
   </footer>
 </div>
+
+<canvas id="celebrationCanvas" class="celebration-canvas"></canvas>
+
+<div class="result-modal-overlay" id="resultOverlay">
+  <div class="result-modal">
+    <h3 id="resultTitle">Checkmate!</h3>
+    <p id="resultSubtitle"></p>
+    <button class="btn" id="resultCloseBtn">Close</button>
+  </div>
+</div>
+
 
 <script id="sunfish-src" type="text/plain">
 from itertools import count
@@ -870,6 +954,13 @@ const statusEl = document.getElementById("statusText");
 const moveListEl = document.getElementById("moveList");
 const promoPicker = document.getElementById("promoPicker");
 const loadingNote = document.getElementById("loadingNote");
+const plateMdEl = document.getElementById("plateMd");
+const plateSfEl = document.getElementById("plateSf");
+const resultOverlayEl = document.getElementById("resultOverlay");
+const resultTitleEl = document.getElementById("resultTitle");
+const resultSubtitleEl = document.getElementById("resultSubtitle");
+const resultCloseBtn = document.getElementById("resultCloseBtn");
+const celebrationCanvas = document.getElementById("celebrationCanvas");
 
 function fileRank(alg){ return { file: alg.charCodeAt(0)-97, rank: parseInt(alg[1],10)-1 }; }
 function algOf(file,rank){ return String.fromCharCode(97+file) + (rank+1); }
@@ -918,18 +1009,92 @@ function renderBoard(){
   }
 }
 
+function updatePlatesGlow(){
+  plateMdEl.classList.remove("thinking");
+  plateSfEl.classList.remove("thinking");
+  if(gameOver) return;
+  const turnWhite = state.white_to_move;
+  let engineToMove = null;
+  if(autoPlay){
+    engineToMove = turnWhite ? "mini_dragon" : "sunfish";
+  } else {
+    const isHumanTurn = (turnWhite === humanWhite);
+    if(!isHumanTurn) engineToMove = opponent;
+  }
+  if(engineToMove==="mini_dragon") plateMdEl.classList.add("thinking");
+  else if(engineToMove==="sunfish") plateSfEl.classList.add("thinking");
+}
+
 function updateStatusText(){
+  updatePlatesGlow();
   if(gameOver){ return; }
   const turnWhite = state.white_to_move;
   const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
   if(autoPlay){
-    statusEl.innerHTML = `<b>Mini Dragon</b> (White) vs <b>Sunfish</b> (Black) — ${turnWhite?"White":"Black"} to move`;
+    const mdCls = "engine-name" + (turnWhite ? " thinking-md" : "");
+    const sfCls = "engine-name" + (!turnWhite ? " thinking-sf" : "");
+    statusEl.innerHTML = `<span class="${mdCls}">Mini Dragon</span> (White) vs <span class="${sfCls}">Sunfish</span> (Black) — ${turnWhite?"White":"Black"} to move`;
     return;
   }
   const isHumanTurn = (turnWhite === humanWhite);
-  statusEl.innerHTML = isHumanTurn
-    ? `Your move — playing <b>${turnWhite?"White":"Black"}</b>`
-    : `<b>${oppName}</b> is playing ${turnWhite?"White":"Black"}`;
+  if(isHumanTurn){
+    statusEl.innerHTML = `Your move — playing <b>${turnWhite?"White":"Black"}</b>`;
+  } else {
+    const cls = "engine-name " + (opponent==="mini_dragon" ? "thinking-md" : "thinking-sf");
+    statusEl.innerHTML = `<span class="${cls}">${oppName}</span> is playing ${turnWhite?"White":"Black"}`;
+  }
+}
+
+const START_COUNTS = {P:8, N:2, B:2, R:2, Q:1};
+const PIECE_VALUES = {P:1, N:3, B:3, R:5, Q:9};
+const CAP_ORDER = ["Q","R","B","N","P"];
+
+const capturesTopEl = document.getElementById("capturesTop");
+const capturesBottomEl = document.getElementById("capturesBottom");
+const capturesAdvTopEl = document.getElementById("capturesAdvTop");
+const capturesAdvBottomEl = document.getElementById("capturesAdvBottom");
+
+function renderCaptures(){
+  const whiteCount = {P:0,N:0,B:0,R:0,Q:0};
+  const blackCount = {P:0,N:0,B:0,R:0,Q:0};
+  for(const row of state.board){
+    for(const p of row){
+      if(!p || p===".") continue;
+      const up = p.toUpperCase();
+      if(!(up in whiteCount)) continue; // skip kings
+      if(p===up) whiteCount[up]++; else blackCount[up]++;
+    }
+  }
+  // pieces missing relative to the start = captured by the opposing side
+  const capturedByBlack = {}; // white pieces black has captured
+  const capturedByWhite = {}; // black pieces white has captured
+  let whiteMaterialLost = 0, blackMaterialLost = 0;
+  for(const t of CAP_ORDER){
+    capturedByBlack[t] = Math.max(START_COUNTS[t] - whiteCount[t], 0);
+    capturedByWhite[t] = Math.max(START_COUNTS[t] - blackCount[t], 0);
+    whiteMaterialLost += capturedByBlack[t] * PIECE_VALUES[t];
+    blackMaterialLost += capturedByWhite[t] * PIECE_VALUES[t];
+  }
+  const diff = blackMaterialLost - whiteMaterialLost; // positive = White is ahead
+
+  const buildHtml = (counts, glyphCase) => {
+    let html = "";
+    for(const t of CAP_ORDER){
+      const glyph = glyphCase==="lower" ? PIECE_GLYPH[t.toLowerCase()] : PIECE_GLYPH[t];
+      for(let i=0;i<counts[t];i++){
+        html += `<span class="cap-piece">${glyph}</span>`;
+      }
+    }
+    return html;
+  };
+
+  // Top row sits above the board (Black's side): shows the white pieces Black has captured.
+  capturesTopEl.innerHTML = buildHtml(capturedByBlack, "upper");
+  // Bottom row sits below the board (White's side): shows the black pieces White has captured.
+  capturesBottomEl.innerHTML = buildHtml(capturedByWhite, "lower");
+
+  capturesAdvTopEl.textContent = diff < 0 ? `+${-diff}` : "";
+  capturesAdvBottomEl.textContent = diff > 0 ? `+${diff}` : "";
 }
 
 function renderMoveLog(){
@@ -950,6 +1115,7 @@ async function refreshState(){
   state = JSON.parse(raw);
   renderBoard();
   renderMoveLog();
+  renderCaptures();
   updateStatusText();
 }
 
@@ -1035,21 +1201,159 @@ const DRAW_LABELS = {
   insufficient_material: "insufficient material",
 };
 
+const CELEBRATION_COLORS = ["#d4772c","#2fb3a3","#f2efe9","#e8b23d","#c1502e","#7ec8e3"];
+let celebrationRAF = null;
+let celebrationTimers = [];
+
+function stopCelebration(){
+  if(celebrationRAF){ cancelAnimationFrame(celebrationRAF); celebrationRAF = null; }
+  celebrationTimers.forEach(id=>clearInterval(id));
+  celebrationTimers = [];
+  const ctx = celebrationCanvas.getContext("2d");
+  ctx.clearRect(0,0,celebrationCanvas.width,celebrationCanvas.height);
+  celebrationCanvas.style.display = "none";
+}
+
+function launchCelebration(){
+  stopCelebration();
+  const canvas = celebrationCanvas;
+  canvas.style.display = "block";
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const ctx = canvas.getContext("2d");
+  let particles = [];
+
+  function randColor(){ return CELEBRATION_COLORS[(Math.random()*CELEBRATION_COLORS.length)|0]; }
+
+  function spawnConfetti(n){
+    for(let i=0;i<n;i++){
+      particles.push({
+        kind:"confetti",
+        x: Math.random()*canvas.width, y: -20 - Math.random()*40,
+        vx: -1.2 + Math.random()*2.4, vy: 2 + Math.random()*2.5,
+        size: 5 + Math.random()*5, color: randColor(),
+        rot: Math.random()*Math.PI*2, vrot: -0.15 + Math.random()*0.3,
+      });
+    }
+  }
+
+  function spawnPopper(x, y, dir){
+    for(let i=0;i<45;i++){
+      const spread = -Math.PI/2 + dir*(Math.random()*0.9 + 0.05);
+      const speed = 6 + Math.random()*7;
+      particles.push({
+        kind:"burst",
+        x, y, vx: Math.cos(spread)*speed, vy: Math.sin(spread)*speed,
+        size: 3 + Math.random()*4, color: randColor(),
+        gravity: 0.22, life: 1, decay: 0.008 + Math.random()*0.006,
+      });
+    }
+  }
+
+  function spawnFirework(){
+    const x = canvas.width * (0.15 + Math.random()*0.7);
+    const y = canvas.height * (0.15 + Math.random()*0.35);
+    const color = randColor();
+    const count = 28 + Math.floor(Math.random()*18);
+    for(let i=0;i<count;i++){
+      const angle = (Math.PI*2*i)/count + Math.random()*0.2;
+      const speed = 2 + Math.random()*4;
+      particles.push({
+        kind:"burst",
+        x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+        size: 2 + Math.random()*2, color,
+        gravity: 0.05, life: 1, decay: 0.012 + Math.random()*0.01,
+      });
+    }
+  }
+
+  spawnConfetti(100);
+  spawnPopper(16, canvas.height - 8, 1);
+  spawnPopper(canvas.width - 16, canvas.height - 8, -1);
+  setTimeout(spawnFirework, 120);
+
+  celebrationTimers.push(setInterval(()=>spawnFirework(), 380));
+  celebrationTimers.push(setInterval(()=>spawnConfetti(18), 300));
+
+  const start = performance.now();
+  function frame(now){
+    const elapsed = now - start;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(const p of particles){
+      if(p.kind==="confetti"){
+        p.x += p.vx; p.y += p.vy; p.rot += p.vrot;
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2);
+        ctx.restore();
+      } else if(p.kind==="burst"){
+        p.vy += p.gravity;
+        p.x += p.vx; p.y += p.vy;
+        p.life -= p.decay;
+        ctx.globalAlpha = Math.max(p.life,0);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+    particles = particles.filter(p=>{
+      if(p.kind==="confetti") return p.y < canvas.height + 30;
+      return p.life > 0;
+    });
+
+    if(elapsed < 3000){
+      celebrationRAF = requestAnimationFrame(frame);
+    } else {
+      stopCelebration();
+    }
+  }
+  celebrationRAF = requestAnimationFrame(frame);
+}
+
+function showResultPopup(title, subtitle){
+  resultTitleEl.textContent = title;
+  resultSubtitleEl.textContent = subtitle;
+  resultOverlayEl.classList.add("show");
+  launchCelebration();
+}
+
+function hideResultPopup(){
+  resultOverlayEl.classList.remove("show");
+}
+
+resultCloseBtn.addEventListener("click", hideResultPopup);
+resultOverlayEl.addEventListener("click", (e)=>{ if(e.target===resultOverlayEl) hideResultPopup(); });
+
 function endGame(reason){
   gameOver = true;
+  updatePlatesGlow();
   const isHumanTurn = (state.white_to_move === humanWhite);
   const loserWhite = state.white_to_move; // side to move has no moves
+  let popupTitle, popupSubtitle;
   if(DRAW_LABELS[reason]){
     statusEl.innerHTML = `<b>Draw</b> — ${DRAW_LABELS[reason]}.`;
+    popupTitle = "Draw";
+    popupSubtitle = `Game drawn by ${DRAW_LABELS[reason]}.`;
   } else if(autoPlay){
-    statusEl.innerHTML = `<b>${loserWhite?"Sunfish":"Mini Dragon"} wins</b> — checkmate.`;
+    const winner = loserWhite ? "Sunfish" : "Mini Dragon";
+    statusEl.innerHTML = `<b>${winner} wins</b> — checkmate.`;
+    popupTitle = `${winner} wins!`;
+    popupSubtitle = "Checkmate.";
   } else {
     const winnerIsHuman = isHumanTurn===false; // side TO MOVE has no moves and is in check -> they lose
+    const oppName = opponent==="mini_dragon" ? "Mini Dragon" : "Sunfish";
     statusEl.innerHTML = winnerIsHuman
       ? "<b>You win</b> — checkmate."
-      : `<b>${opponent==="mini_dragon"?"Mini Dragon":"Sunfish"} wins</b> — checkmate.`;
+      : `<b>${oppName} wins</b> — checkmate.`;
+    popupTitle = winnerIsHuman ? "You win!" : `${oppName} wins!`;
+    popupSubtitle = "Checkmate.";
   }
   if(autoPlay){ autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn(); }
+  showResultPopup(popupTitle, popupSubtitle);
 }
 
 function updateAutoPlayBtn(){
@@ -1077,6 +1381,7 @@ async function stepAutoPlay(){
 
 async function startDuelGame(){
   gameOver = false; lastMove = null; clearSelection();
+  hideResultPopup(); stopCelebration();
   await callWorker("newGame", {opponent, humanWhite: true, duel: true});
   await refreshState();
   if(autoPlay){ if(!autoPlayRunning) stepAutoPlay(); }
@@ -1086,6 +1391,7 @@ async function startNewGame(asWhite){
   autoPlay = false; autoPlayRunning = false; updateAutoPlayBtn();
   humanWhite = asWhite;
   gameOver = false; lastMove = null; clearSelection();
+  hideResultPopup(); stopCelebration();
   await callWorker("newGame", {opponent, humanWhite: asWhite, duel: false});
   await refreshState();
   if(!asWhite) await maybeTriggerAI();
