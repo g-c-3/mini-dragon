@@ -512,6 +512,7 @@ class Game:
         self.move_log = []
         self.halfmove_clock = 0
         self.pos_history = [self._pos_key()]
+        self.md_move_count = 0
 
     def _pos_key_of(self, pos):
         b = tuple(pos.board)
@@ -662,10 +663,16 @@ class Game:
     def ai_move(self, md_depth, sf_depth, sf_node_cap):
         use_md = self.pos.wtm if self.duel else (self.opponent == 'mini_dragon')
         if use_md:
-            r = MD.best_move(self.pos, md_depth)
-            if r is None or r[0] is None:
-                return json.dumps({'ok': False})
-            mv, score = r
+            if self.md_move_count < 3:
+                legal_moves = MD.legal(self.pos)
+                if not legal_moves:
+                    return json.dumps({'ok': False})
+                mv, score = random.choice(legal_moves), None
+            else:
+                r = MD.best_move(self.pos, md_depth)
+                if r is None or r[0] is None:
+                    return json.dumps({'ok': False})
+                mv, score = r
             f, t, c, fl = mv
             if self._would_repeat(f, t, fl):
                 alt = self._pick_non_repeating_move(f, t, fl)
@@ -679,6 +686,7 @@ class Game:
             self.pos = MD.make_move(self.pos, f, t, fl)
             self._post_move_bookkeeping()
             self.move_log.append(mv_str)
+            self.md_move_count += 1
             if self.duel or self.opponent == 'sunfish':
                 self._apply_to_sf(mv_str)
             engine_used = 'mini_dragon'
